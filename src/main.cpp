@@ -1172,6 +1172,9 @@ bool VerifyLayout() {
     Save();
     Main(false);
     auto &main = a->main;
+    // Keep fixture geometry deterministic on hosted runners with small work areas.
+    SetWindowPos(main.hwnd, nullptr, 0, 0, int(760 * main.scale), int(720 * main.scale),
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     auto pointMessage = [&](View &v, UINT message, PointF p) {
         SendMessageW(v.hwnd, message, message == WM_LBUTTONDOWN || message == WM_MOUSEMOVE ? MK_LBUTTON : 0,
                      MAKELPARAM(int(p.X * v.scale), int(p.Y * v.scale)));
