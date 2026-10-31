@@ -2,6 +2,7 @@
 <h1 align="center">Peripheral Battery</h1>
 <p align="center">把无线外设的电量，留在视线里。</p>
 <p align="center">Windows 11 x64 · C++20 / Win32 · MIT · 便携 ZIP</p>
+<p align="center"><a href="https://github.com/Axiomerator/peripheral-battery-checker/actions/workflows/windows.yml"><img src="https://github.com/Axiomerator/peripheral-battery-checker/actions/workflows/windows.yml/badge.svg?branch=main" alt="Windows build"></a></p>
 <p align="center"><a href="https://github.com/Axiomerator/peripheral-battery-checker/releases/latest">下载便携版</a> · <a href="docs/protocols.md">设备协议</a> · <a href="docs/development.md">构建与开发</a></p>
 
 轻量的 Windows 托盘电量监视器，面向指定型号的 2.4 GHz 无线鼠标、耳机和手柄。使用系统原生窗口与 GDI+ 绘图，无需安装运行时。

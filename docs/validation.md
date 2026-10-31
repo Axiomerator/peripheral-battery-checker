@@ -17,6 +17,8 @@
 
 CTest 包含 protocol_parsers 和 ui_regression。
 
+[首次 GitHub Actions 构建](https://github.com/Axiomerator/peripheral-battery-checker/actions/runs/41211104878)已在 windows-2022 运行器上完成独立构建、两项测试与便携打包，全部通过。云端验证使用模拟设备，不替代下面的本机硬件证据。
+
 - 协议：前缀、槽位、长度、越界值、Windows 前导 00、离线、充电。
 - 缓存：73% 后出现突变 15% + 充电时保留原值；静置不覆盖旧值；旧缓存允许合法放电变化。
 - 界面：十二台模拟设备的排序、保存恢复、隐藏筛选、托盘前三台、三个列表滚动、缩放、边缘自动滚动与取消。
