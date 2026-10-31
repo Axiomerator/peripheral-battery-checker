@@ -1,0 +1,39 @@
+# Build products and portable packages stay outside source history.
+/build/
+/build-*/
+/out/
+/dist/
+/releases/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+CMakeUserPresets.json
+*.exe
+*.dll
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.idb
+*.pch
+*.ipch
+*.tlog
+
+# Local device preferences, probes, screenshots and working notes.
+/data/
+/verification/
+/local/
+*.log
+
+# Editor and OS files.
+/.vs/
+/.idea/
+*.user
+*.suo
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+Desktop.ini
