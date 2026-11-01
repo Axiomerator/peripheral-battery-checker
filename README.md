@@ -24,6 +24,8 @@
 
 ZIP 中包含程序、README.txt 和 LICENSE.txt；首次运行在 EXE 旁创建 data/settings.ini。开机自启默认关闭。
 
+自启通过当前用户的 Windows 启动文件夹快捷方式生效，登录后仅驻留托盘，关闭开关会移除启动项。可用 Win+R → shell:startup 直接核对；完整机制和无需重启的检查步骤见 [自启说明](docs/autostart.md)。
+
 升级时先从托盘退出程序，再替换 EXE，保留原有 data 文件夹。移动程序目录后，重新关闭再开启自启，以更新启动路径。
 
 > GitHub 自动生成的 Source code (zip) 是源码。直接运行请选择带 windows-x64 的便携 ZIP。
@@ -73,7 +75,7 @@ C++20 / Win32 / GDI+，静态 C++ 运行库，后台按需等待，隐藏时不�
 
     powershell -ExecutionPolicy Bypass -File tools/build.ps1
 
-输出为 dist/PeripheralBattery.exe；脚本会运行协议与界面回归测试。生成图标时才需要 Python，普通构建和运行不需要 Python。
+输出为 dist/PeripheralBattery.exe；脚本会运行协议、界面与自启隔离回归测试。生成图标时才需要 Python，普通构建和运行不需要 Python。
 
 生成经过构建、测试的便携 ZIP：
 

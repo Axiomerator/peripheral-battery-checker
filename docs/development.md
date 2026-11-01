@@ -23,7 +23,7 @@ Release 输出位置由 PBC_OUTPUT_DIR 指定；UI 测试目录由 PBC_TEST_DATA
 
 ## 验证
 
-CTest 包含协议解析 / 休眠缓存检查，以及十二设备模拟界面的排序、固定通用设置、滚动、窗口缩放和关闭到托盘检查。测试输出位于构建目录的 ui-regression/。
+CTest 包含自启快捷方式隔离检查、协议解析 / 休眠缓存检查，以及十二设备模拟界面的排序、固定通用设置、滚动、窗口缩放和关闭到托盘检查。测试输出位于构建目录的 ui-regression/。
 
     ctest --test-dir build -C Release --output-on-failure
 
@@ -49,6 +49,8 @@ C++ 格式配置为 .clang-format。Windows SDK 头文件存在依赖顺序，�
 | --capture 文件.png | 首次读取后保存真实窗口截图，可配合 --settings / --popup |
 | --verify-layout --data-dir 隔离目录 | 十二设备界面回归，不查询真实 HID |
 | --verify-controls | 登记、显示、间隔写入恢复检查，应使用隔离目录且退出常驻实例 |
+| --autostart on / off / status | 注册、移除或核对当前用户启动项，执行后退出；详见 [自启说明](autostart.md) |
+| --test-startup --data-dir 隔离目录 | 原生快捷方式与启动状态回归，不操作真实登录启动项 |
 | --quit | 退出现有常驻实例 |
 
 --probe 只用于诊断；日常使用由托盘进程管理静置保护。

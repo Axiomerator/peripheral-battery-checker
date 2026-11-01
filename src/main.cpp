@@ -328,6 +328,8 @@ void Main(bool settings) {
     HidePopup();
     a->main.hoverId = a->main.pressedId = 0;
     a->settingsTab = settings;
+    if (!a->verifyLayout)
+        a->settings.startAtLogin = IsAutostartEnabled();
     bool created = !a->main.hwnd;
     Ensure(a->main, false);
     Resize(a->main);
@@ -395,10 +397,11 @@ void Command(int id) {
     }
     if (id == Autostart) {
         std::wstring e;
-        if (SetAutostart(!a->settings.startAtLogin, e))
-            a->settings.startAtLogin = !a->settings.startAtLogin;
-        else
-            a->notice = e;
+        bool updated = SetAutostart(!a->settings.startAtLogin, e);
+        a->settings.startAtLogin = IsAutostartEnabled();
+        a->notice = updated ? L"" : e;
+        if (!updated)
+            MessageBoxW(a->main.hwnd, e.c_str(), L"开机自启", MB_OK | MB_ICONERROR);
     } else if (id >= Seconds30 && id <= Seconds300) {
         const int choices[] = {30, 60, 120, 300};
         a->settings.interval = choices[id - Seconds30];
@@ -1125,6 +1128,11 @@ LRESULT CALLBACK ViewProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return HTCLIENT;
     }
     case WM_ACTIVATE:
+        if (!v->mini && LOWORD(w) != WA_INACTIVE && !a->verifyLayout) {
+            a->settings.startAtLogin = IsAutostartEnabled();
+            Layout(*v);
+            InvalidateRect(h, nullptr, FALSE);
+        }
         if (v->mini && LOWORD(w) == WA_INACTIVE && !a->hover)
             HidePopup();
         break;
@@ -1645,7 +1653,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     int count;
     auto args = CommandLineToArgvW(GetCommandLineW(), &count);
     std::wstring dir = (std::filesystem::path(ExecutablePath()).parent_path() / L"data").wstring(), probe,
-                 capture;
+                 capture, autostart;
     bool tray = false, settings = false, test = false, quit = false, popup = false, verify = false,
          startupTest = false, layoutTest = false, explicitData = false;
     for (int i = 1; i < count; ++i) {
@@ -1662,7 +1670,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             popup = true;
         else if (s == L"--test-startup")
             startupTest = true;
-        else if (s == L"--verify-controls")
+        else if (s == L"--autostart") {
+            if (i + 1 >= count) {
+                LocalFree(args);
+                return 2;
+            }
+            autostart = args[++i];
+        } else if (s == L"--verify-controls")
             verify = true;
         else if (s == L"--verify-layout")
             layoutTest = true;
@@ -1676,15 +1690,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
     LocalFree(args);
 
-    if (layoutTest && !explicitData)
+    if ((layoutTest || startupTest) && !explicitData)
         return 5;
-    if (startupTest) {
-        if (IsAutostartEnabled())
-            return 4;
+    if (!autostart.empty()) {
+        if (autostart == L"status")
+            return IsAutostartEnabled() ? 0 : 3;
+        if (autostart != L"on" && autostart != L"off")
+            return 2;
         std::wstring error;
-        bool enabled = SetAutostart(true, error) && IsAutostartEnabled();
-        bool restored = SetAutostart(false, error) && !IsAutostartEnabled();
-        return enabled && restored ? 0 : 1;
+        return SetAutostart(autostart == L"on", error) ? 0 : 1;
+    }
+    if (startupTest) {
+        std::wstring error;
+        return RunAutostartTests(dir, error) ? 0 : 1;
     }
     if (test) {
         std::wstring e;
@@ -1715,6 +1733,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     a = &state;
     a->instance = instance;
     a->directory = dir;
+    if (!layoutTest && !verify) {
+        std::wstring error;
+        if (!MigrateAutostart(error))
+            MessageBoxW(nullptr, error.c_str(), L"开机自启", MB_OK | MB_ICONERROR);
+    }
     a->settings = LoadSettings(dir);
     a->capture = capture;
     a->capturePopup = popup;

@@ -4,10 +4,6 @@
 #include <filesystem>
 #include <fstream>
 namespace pbc {
-namespace {
-constexpr wchar_t runKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t appValue[] = L"PeripheralBattery";
-} // namespace
 std::wstring ExecutablePath() {
     std::wstring p(32768, L'\0');
     auto n = GetModuleFileNameW(nullptr, p.data(), DWORD(p.size()));
@@ -104,39 +100,4 @@ bool MoveDevice(std::vector<Device> &devices, Settings &settings, const std::wst
     return true;
 }
 
-bool IsAutostartEnabled() {
-    HKEY key;
-    bool enabled = false;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, runKey, 0, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS) {
-        DWORD type = 0, size = 0;
-        enabled = RegQueryValueExW(key, appValue, nullptr, &type, nullptr, &size) == ERROR_SUCCESS &&
-                  type == REG_SZ && size > 2;
-        RegCloseKey(key);
-    }
-    return enabled;
-}
-bool SetAutostart(bool enabled, std::wstring &error) {
-    HKEY key;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, runKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) !=
-        ERROR_SUCCESS) {
-        error = L"无法访问当前用户启动项";
-        return false;
-    }
-    LSTATUS st;
-    if (enabled) {
-        auto cmd = L"\"" + ExecutablePath() + L"\" --tray";
-        st = RegSetValueExW(key, appValue, 0, REG_SZ, reinterpret_cast<const BYTE *>(cmd.c_str()),
-                            DWORD((cmd.size() + 1) * 2));
-    } else {
-        st = RegDeleteValueW(key, appValue);
-        if (st == ERROR_FILE_NOT_FOUND)
-            st = ERROR_SUCCESS;
-    }
-    RegCloseKey(key);
-    if (st != ERROR_SUCCESS) {
-        error = L"无法更新开机自启";
-        return false;
-    }
-    return true;
-}
 } // namespace pbc

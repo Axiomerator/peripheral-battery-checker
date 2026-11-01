@@ -1,5 +1,16 @@
 # 更新记录
 
+## [0.1.1] - 2026-11-01
+
+修复 Windows 登录自启。
+
+- 使用当前用户启动文件夹中的原生快捷方式，保存 EXE 路径、--tray 参数及工作目录。
+- 开关操作后读回核验，控制中心重新激活时同步 Windows 状态，写入或移除失败时显示错误。
+- 关闭自启会移除快捷方式和旧 Run 项；升级时迁移有效的旧启动项。
+- 新增自启隔离回归和 --autostart on / off / status 诊断命令。
+
+下载 **PeripheralBattery-0.1.1-windows-x64.zip**，退出旧版后替换 EXE，保留 data 文件夹。若旧版未留下有效启动项，请在新版设置中重新开启自启。无需重启的检查方法见 [自启说明](https://github.com/Axiomerator/peripheral-battery-checker/blob/main/docs/autostart.md)。
+
 ## [0.1.0] - 2026-10-31
 
 首个公开版本。

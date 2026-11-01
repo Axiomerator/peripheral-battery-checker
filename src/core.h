@@ -47,6 +47,8 @@ Settings LoadSettings(const std::wstring &);
 bool SaveSettings(const Settings &, const std::wstring &, std::wstring &);
 bool SetAutostart(bool, std::wstring &);
 bool IsAutostartEnabled();
+bool MigrateAutostart(std::wstring &);
+bool RunAutostartTests(const std::wstring &, std::wstring &);
 std::wstring ExecutablePath();
 bool RunParserTests(std::wstring &);
 void SortDevices(std::vector<Device> &, const Settings &);

@@ -1,6 +1,6 @@
 # 验证记录
 
-记录日期：2026-10-31。实机环境为 Windows 11 x64、MSVC 19.44、Windows SDK 10.0.26100。
+更新日期：2026-11-01。实机环境为 Windows 11 x64、MSVC 19.44、Windows SDK 10.0.26100。
 
 ## 硬件
 
@@ -15,7 +15,7 @@
 
 ## 自动检查
 
-CTest 包含 protocol_parsers 和 ui_regression。
+CTest 包含 protocol_parsers、ui_regression 和 autostart_regression。
 
 [首次 GitHub Actions 构建](https://github.com/Axiomerator/peripheral-battery-checker/actions/runs/41211104878)已在 windows-2022 运行器上完成独立构建、两项测试与便携打包，全部通过。云端验证使用模拟设备，不替代下面的本机硬件证据。
 
@@ -29,7 +29,11 @@ CTest 包含 protocol_parsers 和 ui_regression。
 
 检查通过，命令和产物位置见 [开发说明](development.md)。缓冲画面与窗口截图检查不等同于真实桌面连续录屏。
 
-当前用户自启曾通过创建、读回、撤销的本机集成验证；普通界面回归不操作系统自启。单实例启动已验证。
+旧版 Run 自启曾通过创建、读回、撤销检查，但用户随后反馈重启未启动；2026-11-01 核查时，真实用户的 Run 与启动文件夹均无本程序注册项，旧验证未覆盖登录链路。
+
+0.1.1 改用当前用户启动文件夹中的原生快捷方式，增加目标 / 参数 / 工作目录核验、系统状态刷新、错误反馈和旧项清理。隔离回归覆盖中文与带空格路径、错误目标 / 参数、Windows 禁用与重新开启、重复移除及写入失败。本机实际注册后，Win32_StartupCommand 已枚举到 Peripheral Battery；启动文件夹快捷方式可正常启动 --tray 进程。关闭及重复关闭后快捷方式和枚举项均移除，旧 Run 项不存在；重新开启及正常启动时的旧 Run 项迁移通过，个人 settings.ini 哈希不变。测试结束保留自启开启。
+
+真实登录结果需要注销后重新登录确认，步骤见 [自启说明](autostart.md)。单实例启动已验证。
 
 ## 资源采样
 
