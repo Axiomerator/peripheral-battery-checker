@@ -41,7 +41,7 @@ ZIP 中包含程序、README.txt 和 LICENSE.txt；首次运行在 EXE 旁创建
 | Logitech G502 X PLUS / LIGHTSPEED 接收器 | 046D:C547 | 本机真机通过 |
 | SteelSeries Nova 7 Gen 2 | 1038:227E | 本机真机通过 |
 | 北通盘古 BTP-PG01A | 20BC:5162 | 本机真机通过 |
-| MCHOSE K99 V3 / 2.4 GHz 接收器 | 3837:3033 | 本机实测电量和充电切换，另核对 USB 产品名 |
+| MCHOSE K99 V3 / USB 有线或 2.4 GHz 接收器 | 3837:2020 / 3837:3033 | 两种模式均实测读数，另核对 USB 产品名，同时连接时优先有线 |
 | Logitech PRO 2 LIGHTSPEED | 046D:C543 / C09A | 工位用户反馈电量与充电可读，连接路径待逐一核对 |
 | G502 X PLUS USB 直连 | 046D:C095 | 实验性备用路径，未真机验证 |
 

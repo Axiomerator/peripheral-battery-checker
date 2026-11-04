@@ -31,6 +31,12 @@ struct Interface {
     HIDP_CAPS caps{};
 };
 using Bytes = std::vector<uint8_t>;
+bool IsMchoseBatteryInterface(const Interface &x) {
+    return x.attr.VendorID == 0x3837 &&
+           (x.attr.ProductID == MchoseK99WiredPid || x.attr.ProductID == MchoseK99ReceiverPid) &&
+           x.caps.UsagePage == 1 && x.caps.Usage == 0 && x.caps.InputReportByteLength == 65 &&
+           x.caps.OutputReportByteLength == 65 && x.caps.FeatureReportByteLength == 0;
+}
 std::wstring ErrorText(DWORD e) {
     wchar_t *t = nullptr;
     FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
@@ -70,7 +76,8 @@ std::vector<Interface> Enumerate() {
         if (!SetupDiGetDeviceInterfaceDetailW(info, &d, detail, n, nullptr, nullptr))
             continue;
         std::wstring path = detail->DevicePath;
-        bool mchoseChannel = path.find(L"vid_3837&pid_3033&mi_01#") != std::wstring::npos;
+        bool mchoseWired = path.find(L"vid_3837&pid_2020&mi_01#") != std::wstring::npos;
+        bool mchoseChannel = mchoseWired || path.find(L"vid_3837&pid_3033&mi_01#") != std::wstring::npos;
         if (path.find(L"vid_046d") == std::wstring::npos && path.find(L"vid_1038") == std::wstring::npos &&
             path.find(L"vid_20bc") == std::wstring::npos && !mchoseChannel)
             continue;
@@ -86,7 +93,7 @@ std::vector<Interface> Enumerate() {
             // MCHOSE reuses 3837:3033 across keyboard models.
             wchar_t product[128]{};
             if (!HidD_GetProductString(h.h, product, sizeof(product)) ||
-                std::wstring_view(product) != L"MCHOSE K99 V3 2.4G")
+                std::wstring_view(product) != (mchoseWired ? L"MCHOSE K99 V3" : L"MCHOSE K99 V3 2.4G"))
                 continue;
         }
         PHIDP_PREPARSED_DATA pp = nullptr;
@@ -284,6 +291,9 @@ void QueryDevice(Device &d) {
 }
 } // namespace
 std::wstring DeviceKey(Protocol p, USHORT pid, int slot) {
+    // Keep the original receiver key for preferences shared by both connections.
+    if (p == Protocol::MchoseK99V3)
+        pid = MchoseK99ReceiverPid;
     wchar_t b[64];
     swprintf_s(b, L"%s-%04X-%d",
                p == Protocol::Logitech      ? L"logi"
@@ -341,7 +351,12 @@ ScanResult ScanDevices(const Settings &s, bool enroll) {
         bool hasReceiver = std::any_of(interfaces.begin(), interfaces.end(), [](auto &x) {
             return x.attr.VendorID == 0x046d && x.attr.ProductID == 0xc547;
         });
+        bool hasMchoseWired = std::any_of(interfaces.begin(), interfaces.end(), [](const auto &x) {
+            return x.attr.ProductID == MchoseK99WiredPid && IsMchoseBatteryInterface(x);
+        });
         for (const auto &x : interfaces) {
+            if (hasMchoseWired && x.attr.VendorID == 0x3837 && x.attr.ProductID == MchoseK99ReceiverPid)
+                continue;
             if (hasReceiver && x.attr.VendorID == 0x046d && x.attr.ProductID == 0xc095)
                 continue;
             Device d;
@@ -384,11 +399,10 @@ ScanResult ScanDevices(const Settings &s, bool enroll) {
                 d.protocol = Protocol::Pangu;
                 d.kind = Kind::Gamepad;
                 match = true;
-            } else if (x.attr.VendorID == 0x3837 && x.attr.ProductID == 0x3033 && x.caps.UsagePage == 1 &&
-                       x.caps.Usage == 0 && x.caps.InputReportByteLength == 65 &&
-                       x.caps.OutputReportByteLength == 65 && x.caps.FeatureReportByteLength == 0) {
+            } else if (IsMchoseBatteryInterface(x)) {
                 d.name = L"K99 V3";
-                d.subtitle = L"MCHOSE · 2.4 GHz";
+                d.subtitle =
+                    x.attr.ProductID == MchoseK99WiredPid ? L"MCHOSE · USB 有线" : L"MCHOSE · 2.4 GHz";
                 d.protocol = Protocol::MchoseK99V3;
                 d.kind = Kind::Keyboard;
                 match = true;
@@ -401,7 +415,7 @@ ScanResult ScanDevices(const Settings &s, bool enroll) {
             d.registered = it != s.devices.end() ? it->second.registered : enroll;
             d.visible = it != s.devices.end() ? it->second.visible : true;
             d.connected = true;
-            d.dormant = s.paused.contains(d.key);
+            d.dormant = !d.IsMchoseWired() && s.paused.contains(d.key);
             if (d.registered && !d.dormant)
                 QueryDevice(d);
             if (d.protocol == Protocol::MchoseK99V3 && d.queried && !d.connected)
@@ -546,6 +560,13 @@ bool RunParserTests(std::wstring &e) {
     k99[4] = 0x4f;
     k99[2] = 0x03;
     c(ParseMchoseK99V3(k99).level == -1, L"k99 receiver info is not battery");
+    c(DeviceKey(Protocol::MchoseK99V3, MchoseK99WiredPid) == L"mchose-3033-1",
+      L"k99 wired shares existing receiver preferences");
+    k99[2] = 0x05;
+    k99[43] = 1;
+    k99[4] = 0x4e;
+    keyboard = ParseMchoseK99V3(k99);
+    c(keyboard.level == 100 && keyboard.charging, L"k99 wired sample");
     std::array<uint8_t, 65> link{0, 0xfa, 0xfb, 6, 0};
     c(ParseMchoseLink(link) == MchoseLink::Down, L"k99 link lost");
     link[4] = 1;

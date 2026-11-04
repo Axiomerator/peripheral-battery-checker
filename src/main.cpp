@@ -112,15 +112,18 @@ std::wstring Status(const Device &d) {
         return L"尚未登记";
     if (d.dormant && d.battery.error == L"读数异常，保留上次电量")
         return d.battery.error;
-    if (d.dormant && d.protocol == Protocol::MchoseK99V3)
+    if (d.dormant && d.protocol == Protocol::MchoseK99V3) {
+        if (d.IsMchoseWired() && !d.path.empty())
+            return d.battery.level >= 0 ? L"保留上次电量" : L"电量暂不可用";
         return d.battery.level >= 0 ? L"未连接 · 保留电量" : L"未连接";
+    }
     if (d.dormant)
         return d.connected ? L"静置 · 已暂停查询" : L"休眠或未连接 · 保留上次电量";
     if (d.battery.level < 0)
         return L"暂不可用";
     if (d.battery.full)
         return L"已充满";
-    return d.battery.charging ? L"正在充电" : L"电池供电";
+    return d.battery.charging ? L"正在充电" : d.IsMchoseWired() ? L"未充电" : L"电池供电";
 }
 void UpdatePause() {
     auto now = GetTickCount64();
@@ -167,6 +170,7 @@ void Tray(bool add = false) {
     for (auto *d : Visible()) {
         auto line = L"\n" + d->name + L"  " +
                     (d->battery.level < 0 ? L"未知" : std::to_wstring(d->battery.level) + L"%") +
+                    (d->IsMchoseWired() && !d->path.empty() ? L" · 有线" : L"") +
                     (d->battery.charging && !d->dormant ? L" · 充电中" : L"");
         if (tip.size() + line.size() >= std::size(a->nid.szTip))
             break;
@@ -519,7 +523,8 @@ void Card(Graphics &g, const Device &d, float y, int width, bool mini) {
     float labelWidth = mini ? number.X - tx - (charging ? 24.f : 8.f) : w - 250;
     Text(g, d.name, tx, y + (mini ? 10.f : 17.f), labelWidth, 26, mini ? 13.f : 16.f, Ink(), true);
     if (mini)
-        Text(g, Status(d), tx, y + 36, labelWidth, 20, 10, Muted());
+        Text(g, (d.IsMchoseWired() && !d.path.empty() ? L"有线 · " : L"") + Status(d), tx, y + 36, labelWidth,
+             20, 10, Muted());
     else {
         Text(g, d.subtitle, tx, y + 47, w - 250, 20, 11, Muted());
         auto status = Status(d);
@@ -595,9 +600,10 @@ void DrawFrame(Graphics &g, View &v) {
             Text(g, d.name, 110, y + 7, w - 364, 24, 14, Ink(), true);
             wchar_t id[70];
             swprintf_s(id, L"%04X:%04X · %s", d.vid, d.pid,
-                       d.dormant && d.protocol != Protocol::MchoseK99V3 ? L"静置 / 休眠"
-                       : d.connected                                    ? L"已连接"
-                                                                        : L"未连接");
+                       d.IsMchoseWired() && !d.path.empty()               ? L"有线连接"
+                       : d.dormant && d.protocol != Protocol::MchoseK99V3 ? L"静置 / 休眠"
+                       : d.connected                                      ? L"已连接"
+                                                                          : L"未连接");
             Text(g, id, 110, y + 36, w - 364, 20, 10, Muted());
             Line(g, 40, y + 78, w - 40, y + 78, Edge(), 1);
         }
@@ -782,7 +788,9 @@ void Apply(ScanResult &r) {
     bool preferencesChanged = false, pauseChanged = false;
     for (auto &d : r.devices) {
         auto old = std::find_if(previous.begin(), previous.end(), [&](auto &x) { return x.key == d.key; });
-        if (d.protocol == Protocol::MchoseK99V3 && a->settings.paused.contains(d.key)) {
+        if (d.IsMchoseWired()) {
+            pauseChanged |= a->settings.paused.erase(d.key) > 0;
+        } else if (d.protocol == Protocol::MchoseK99V3 && a->settings.paused.contains(d.key)) {
             // A query already in flight may finish after the link-loss notification.
             d.battery = {};
             d.dormant = true;
@@ -822,6 +830,7 @@ void Apply(ScanResult &r) {
             d.battery.error = L"休眠或接收器未连接";
             if (d.protocol == Protocol::MchoseK99V3 && r.error.empty()) {
                 d.path.clear();
+                d.subtitle = L"MCHOSE";
                 pauseChanged |= a->settings.paused.erase(d.key) > 0;
             }
             r.devices.push_back(d);
@@ -829,7 +838,7 @@ void Apply(ScanResult &r) {
     a->devices = std::move(r.devices);
     SortDevices(a->devices, a->settings);
     auto keyboard = std::find_if(a->devices.begin(), a->devices.end(), [](const auto &d) {
-        return d.protocol == Protocol::MchoseK99V3 && d.registered && !d.path.empty();
+        return d.protocol == Protocol::MchoseK99V3 && !d.IsMchoseWired() && d.registered && !d.path.empty();
     });
     const std::wstring path = keyboard == a->devices.end() ? L"" : keyboard->path;
     if (path != a->mchosePath) {
@@ -1247,6 +1256,17 @@ bool VerifyLayout() {
     keyboard.connected = true;
     keyboard.path.clear();
     a->mchosePath.clear();
+
+    ScanResult wired{a->devices, {}};
+    wired.devices[3].pid = MchoseK99WiredPid;
+    wired.devices[3].path = L"test wired keyboard";
+    wired.devices[3].queried = true;
+    a->settings.paused.insert(keyboard.key);
+    Apply(wired);
+    const auto &wiredKeyboard = a->devices[3];
+    check(wiredKeyboard.connected && !wiredKeyboard.dormant &&
+              !a->workerSettings.paused.contains(wiredKeyboard.key) && a->mchosePath.empty(),
+          "wired keyboard clears wireless pause and does not start a receiver watcher");
     a->busy = false;
     bool allDigitsFit = true;
     FontFamily family(L"Microsoft YaHei UI");
@@ -1888,11 +1908,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             d.protocol = Protocol::Nova;
             d.name = L"Nova 7 Gen 2";
             d.subtitle = L"SteelSeries · 2.4 GHz";
-        } else if (key == DeviceKey(Protocol::MchoseK99V3, 0x3033)) {
+        } else if (key == DeviceKey(Protocol::MchoseK99V3, MchoseK99ReceiverPid)) {
             d.kind = Kind::Keyboard;
             d.protocol = Protocol::MchoseK99V3;
             d.name = L"K99 V3";
-            d.subtitle = L"MCHOSE · 2.4 GHz";
+            d.subtitle = L"MCHOSE";
         } else {
             d.kind = Kind::Gamepad;
             d.protocol = Protocol::Pangu;

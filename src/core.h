@@ -10,6 +10,7 @@ namespace pbc {
 enum class Kind { Mouse, Headset, Gamepad, Keyboard };
 enum class Protocol { Logitech, Nova, Pangu, MchoseK99V3 };
 enum class MchoseLink { Down, Up, Closed };
+constexpr USHORT MchoseK99WiredPid = 0x2020, MchoseK99ReceiverPid = 0x3033;
 struct Reading {
     int level = -1;
     bool charging = false, full = false;
@@ -24,6 +25,9 @@ struct Device {
     bool connected = false, registered = true, visible = true, dormant = false, queried = false;
     Reading battery;
     SYSTEMTIME updated{};
+    bool IsMchoseWired() const {
+        return protocol == Protocol::MchoseK99V3 && pid == MchoseK99WiredPid;
+    }
 };
 struct Preference {
     bool registered = true, visible = true;
