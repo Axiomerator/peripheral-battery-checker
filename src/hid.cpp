@@ -8,6 +8,7 @@
 #include <hidpi.h>
 #include <iomanip>
 #include <setupapi.h>
+#include <string_view>
 namespace pbc {
 namespace {
 struct Handle {
@@ -68,8 +69,9 @@ std::vector<Interface> Enumerate() {
         if (!SetupDiGetDeviceInterfaceDetailW(info, &d, detail, n, nullptr, nullptr))
             continue;
         std::wstring path = detail->DevicePath;
+        bool mchoseChannel = path.find(L"vid_3837&pid_3033&mi_01#") != std::wstring::npos;
         if (path.find(L"vid_046d") == std::wstring::npos && path.find(L"vid_1038") == std::wstring::npos &&
-            path.find(L"vid_20bc") == std::wstring::npos)
+            path.find(L"vid_20bc") == std::wstring::npos && !mchoseChannel)
             continue;
         Handle h(CreateFileW(path.c_str(), 0, 3, nullptr, OPEN_EXISTING, 0, nullptr));
         if (!h)
@@ -79,6 +81,13 @@ std::vector<Interface> Enumerate() {
         x.attr.Size = sizeof(x.attr);
         if (!HidD_GetAttributes(h.h, &x.attr))
             continue;
+        if (mchoseChannel) {
+            // MCHOSE reuses 3837:3033 across keyboard models.
+            wchar_t product[128]{};
+            if (!HidD_GetProductString(h.h, product, sizeof(product)) ||
+                std::wstring_view(product) != L"MCHOSE K99 V3 2.4G")
+                continue;
+        }
         PHIDP_PREPARSED_DATA pp = nullptr;
         if (!HidD_GetPreparsedData(h.h, &pp))
             continue;
@@ -182,6 +191,18 @@ void Fill(Device &d, const Interface &x) {
     if (a != std::wstring::npos)
         d.interfaceName = x.path.substr(a + 1, b - a - 1);
 }
+Reading ParseMchoseK99V3(std::span<const uint8_t> r) {
+    // Windows prefixes the unnumbered 64-byte HID payload with report ID zero.
+    if (r.size() != 65 || r[0] != 0 || r[1] != 0xaa || r[2] != 0x05 || r[5] != 56 || r[6] != 0 || r[7] != 0)
+        return {};
+    unsigned checksum = 0;
+    for (auto byte : r.subspan(5))
+        checksum += byte;
+    int level = r[41] & 0x7f; // 1-byte HID prefix + 8-byte header + payload offset 32.
+    if (uint8_t(checksum) != r[4] || level > 100)
+        return {};
+    return {.level = level, .charging = (r[41] & 0x80) != 0};
+}
 void QueryDevice(Device &d) {
     d.queried = true;
     try {
@@ -210,6 +231,23 @@ void QueryDevice(Device &d) {
                         d.battery.error = L"未收到有效电池回复";
                 } else
                     d.battery.error = L"设备休眠或没有支持的电池功能";
+            }
+        } else if (d.protocol == Protocol::MchoseK99V3) {
+            // Read the first 56 bytes of profile 0's function config, containing the battery byte.
+            Bytes q(d.outSize, 0);
+            constexpr uint8_t request[] = {0, 0x55, 0x05, 0, 0x38, 0x38};
+            std::copy(std::begin(request), std::end(request), q.begin());
+            d.battery.error = L"未收到有效的键盘电量回复";
+            if (!Transfer(h.h, &q, d.outSize, 400).empty()) {
+                auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(650);
+                while (std::chrono::steady_clock::now() < until) {
+                    auto r = Transfer(h.h, nullptr, d.inSize, 100);
+                    auto reading = ParseMchoseK99V3(r);
+                    if (reading.level >= 0) {
+                        d.battery = std::move(reading);
+                        break;
+                    }
+                }
             }
         } else {
             Bytes q(d.outSize, 0);
@@ -241,9 +279,10 @@ void QueryDevice(Device &d) {
 std::wstring DeviceKey(Protocol p, USHORT pid, int slot) {
     wchar_t b[64];
     swprintf_s(b, L"%s-%04X-%d",
-               p == Protocol::Logitech ? L"logi"
-               : p == Protocol::Nova   ? L"nova"
-                                       : L"pangu",
+               p == Protocol::Logitech      ? L"logi"
+               : p == Protocol::Nova        ? L"nova"
+               : p == Protocol::MchoseK99V3 ? L"mchose"
+                                            : L"pangu",
                pid, slot);
     return b;
 }
@@ -337,6 +376,14 @@ ScanResult ScanDevices(const Settings &s, bool enroll) {
                 d.subtitle = L"BEITONG · BTP-PG01A";
                 d.protocol = Protocol::Pangu;
                 d.kind = Kind::Gamepad;
+                match = true;
+            } else if (x.attr.VendorID == 0x3837 && x.attr.ProductID == 0x3033 && x.caps.UsagePage == 1 &&
+                       x.caps.Usage == 0 && x.caps.InputReportByteLength == 65 &&
+                       x.caps.OutputReportByteLength == 65 && x.caps.FeatureReportByteLength == 0) {
+                d.name = L"K99 V3";
+                d.subtitle = L"MCHOSE · 2.4 GHz";
+                d.protocol = Protocol::MchoseK99V3;
+                d.kind = Kind::Keyboard;
                 match = true;
             }
             if (!match)
@@ -452,6 +499,27 @@ bool RunParserTests(std::wstring &e) {
     q[1] = 0x25;
     c(ParsePangu(q).level == -1, L"pangu unrelated");
     c(ParseNova({}).level == -1 && ParsePangu({}).level == -1, L"short reports");
+    // Actual 100% reply from K99 V3. Plugging in changes byte 41 and the checksum.
+    std::array<uint8_t, 65> k99{0x00, 0xaa, 0x05, 0x00, 0xcf, 0x38, 0x00, 0x00, 0x00, 0x50, 0x00, 0xaa, 0xbb,
+                                0x01, 0x01, 0x00, 0x01, 0x06, 0x64, 0x00, 0x00, 0x01, 0x00, 0xff, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0xff, 0x01, 0x01, 0x01, 0x00, 0x64, 0x01, 0x01, 0x01, 0xff,
+                                0x00, 0x00, 0x64, 0x00, 0x02, 0x02, 0x00, 0x01, 0x01, 0x00, 0xff, 0xff, 0xff,
+                                0x00, 0x00, 0x64, 0x01, 0x01, 0x01, 0xff, 0x00, 0x00, 0x10, 0x10, 0x10, 0x10};
+    auto keyboard = ParseMchoseK99V3(k99);
+    c(keyboard.level == 100 && !keyboard.charging, L"k99 unplugged");
+    k99[41] = 0xe4;
+    c(ParseMchoseK99V3(k99).level == -1, L"k99 checksum");
+    k99[4] = 0x4f;
+    keyboard = ParseMchoseK99V3(k99);
+    c(keyboard.level == 100 && keyboard.charging, L"k99 charging at 100 percent");
+    c(ParseMchoseK99V3(std::span(k99).first(41)).level == -1, L"k99 truncated");
+    k99[41] = 0xff;
+    k99[4] = 0x6a;
+    c(ParseMchoseK99V3(k99).level == -1, L"k99 invalid battery level");
+    k99[41] = 0xe4;
+    k99[4] = 0x4f;
+    k99[2] = 0x03;
+    c(ParseMchoseK99V3(k99).level == -1, L"k99 receiver info is not battery");
     Device previous;
     previous.battery.level = 73;
     Device current;

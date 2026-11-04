@@ -162,7 +162,7 @@ void Tray(bool add = false) {
     for (auto *d : Visible())
         tip += L"\n" + d->name + L"  " +
                (d->battery.level < 0 ? L"未知" : std::to_wstring(d->battery.level) + L"%") +
-               (d->battery.charging ? L" · 充电中" : L"");
+               (d->battery.charging && !d->dormant ? L" · 充电中" : L"");
     wcsncpy_s(a->nid.szTip, tip.c_str(), _TRUNCATE);
     Shell_NotifyIconW(add ? NIM_ADD : NIM_MODIFY, &a->nid);
     if (add) {
@@ -1168,7 +1168,7 @@ bool VerifyLayout() {
         d.key = L"ui-fixture-" + std::to_wstring(i);
         d.name = L"测试设备 " + std::to_wstring(i + 1);
         d.subtitle = L"布局验证 · 非真实设备";
-        d.kind = Kind(i % 3);
+        d.kind = Kind(i % 4);
         d.battery.level = 28 + i * 5;
         d.connected = true;
         a->settings.devices[d.key] = {true, true, i};
@@ -1760,6 +1760,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             d.protocol = Protocol::Nova;
             d.name = L"Nova 7 Gen 2";
             d.subtitle = L"SteelSeries · 2.4 GHz";
+        } else if (key == DeviceKey(Protocol::MchoseK99V3, 0x3033)) {
+            d.kind = Kind::Keyboard;
+            d.protocol = Protocol::MchoseK99V3;
+            d.name = L"K99 V3";
+            d.subtitle = L"MCHOSE · 2.4 GHz";
         } else {
             d.kind = Kind::Gamepad;
             d.protocol = Protocol::Pangu;

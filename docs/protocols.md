@@ -23,6 +23,16 @@ Report ID 11，槽位 01。Root.GetFeature(1004) 返回 Unified Battery 索引�
 XInput 返回 WIRED/FULL，不能作为电量。
 休眠时厂商接口可能从 PnP 消失。
 
+## MCHOSE K99 V3
+
+接收器为 3837:3033，USB 产品名为 MCHOSE K99 V3 2.4G。厂商在多款键盘上复用这组 VID/PID，程序同时匹配产品名、MI_01、0001:0000、Input/Output 65、Feature 0。
+
+向该接口发送 00 55 05 00 38 38，补零至 65 字节，仅读取功能配置的第一段。首字节 00 是 Windows 给无编号 HID 报告加的 Report ID。接受 00 AA 05 开头、数据长度 56、偏移为零的 65 字节回复，并核对校验字节 [4] 等于从 [5] 起求和取低 8 位。
+
+索引从零起算。功能配置数据从报告 [9] 开始，数据 [32] 即报告 [41]。低七位为电量百分比，最高位为充电标志。真机断电时为 64（100%，电池供电），接上供电后为 E4（100%，充电中），与 MCHOSE HUB 一致。三个配置档返回相同的电量与充电标志，程序只需读取一段。
+
+命令 03 读的是设备信息。本机回包包含接收器的版本和名称，其中的 34 不能解释为 52% 电量。字段依据为官方 Web SDK 的功能配置解析。 [官方驱动](https://www.mchose.com.cn/) · [SDK 脚本](https://www.mchose.com.cn/cizhou/CZ_SHARED_DATA/main.b1d3fb6f68d495cc5961.js)
+
 ## 静置与缓存
 鼠标 15 秒无对应 Raw Input 活动后停止主动查询；盘古以厂商接口消失判断休眠或断开，接口重现后恢复。
 只使用 RAWINPUTHEADER.hDevice 和 RIDI_DEVICENAME，不读取输入内容。

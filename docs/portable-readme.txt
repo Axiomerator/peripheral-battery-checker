@@ -20,6 +20,7 @@ Win+R 输入 shell:startup 可核对 Peripheral Battery 快捷方式；关闭自
 Logitech G502 X PLUS 接收器（046D:C547）
 SteelSeries Nova 7 Gen 2（1038:227E）
 北通盘古 BTP-PG01A（20BC:5162）
+迈从 K99 V3 2.4 GHz 接收器（3837:3033，另核对 USB 产品名）
 
 源码、完整说明与问题反馈：
 https://github.com/Axiomerator/peripheral-battery-checker

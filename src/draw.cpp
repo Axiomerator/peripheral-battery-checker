@@ -84,6 +84,12 @@ void DeviceIcon(Graphics &g, Kind kind, float x, float y, float size, Color colo
         Line(g, 40, 38, 34, 43, color);
         Line(g, 34, 43, 27, 43, color);
         Round(g, 24, 41, 6, 4, 2, color);
+    } else if (kind == Kind::Keyboard) {
+        Round(g, 2, 11, 44, 26, 5, Color(0, 0, 0, 0), color);
+        for (int row = 0; row < 2; ++row)
+            for (int col = 0; col < 6; ++col)
+                Round(g, 8.f + col * 5.7f, 16.f + row * 6, 3.1f, 3.1f, 1, color);
+        Round(g, 14, 28, 20, 3, 1, color);
     } else {
         GraphicsPath path;
         path.AddBezier(11, 14, 5, 14, 4, 28, 4, 35);

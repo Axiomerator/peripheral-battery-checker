@@ -7,8 +7,8 @@
 #include <vector>
 #include <windows.h>
 namespace pbc {
-enum class Kind { Mouse, Headset, Gamepad };
-enum class Protocol { Logitech, Nova, Pangu };
+enum class Kind { Mouse, Headset, Gamepad, Keyboard };
+enum class Protocol { Logitech, Nova, Pangu, MchoseK99V3 };
 struct Reading {
     int level = -1;
     bool charging = false, full = false;
