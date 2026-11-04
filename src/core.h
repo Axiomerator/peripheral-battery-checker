@@ -9,6 +9,7 @@
 namespace pbc {
 enum class Kind { Mouse, Headset, Gamepad, Keyboard };
 enum class Protocol { Logitech, Nova, Pangu, MchoseK99V3 };
+enum class MchoseLink { Down, Up, Closed };
 struct Reading {
     int level = -1;
     bool charging = false, full = false;
@@ -54,6 +55,7 @@ bool RunParserTests(std::wstring &);
 void SortDevices(std::vector<Device> &, const Settings &);
 bool MoveDevice(std::vector<Device> &, Settings &, const std::wstring &, const std::wstring &, bool);
 void WatchNova(const std::wstring &, HANDLE, HWND, UINT, UINT);
+void WatchMchose(const std::wstring &, HANDLE, HWND, UINT);
 void PreserveReading(Device &, const Device &, bool recent);
 bool WriteProbe(const std::wstring &, const ScanResult &);
 } // namespace pbc

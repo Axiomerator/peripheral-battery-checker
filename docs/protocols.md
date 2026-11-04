@@ -33,6 +33,8 @@ XInput 返回 WIRED/FULL，不能作为电量。
 
 命令 03 读的是设备信息。本机回包包含接收器的版本和名称，其中的 34 不能解释为 52% 电量。字段依据为官方 Web SDK 的功能配置解析。 [官方驱动](https://www.mchose.com.cn/) · [SDK 脚本](https://www.mchose.com.cn/cizhou/CZ_SHARED_DATA/main.b1d3fb6f68d495cc5961.js)
 
+接收器的链路通知使用 00 FA FB 06，后续 00 表示通信停止，01 表示恢复。通知语义来自官方 SDK，程序被动监听。中断时保留缓存并暂停查询，恢复时补读。单次查询无有效回复时显示未连接，后续常规刷新仍可尝试恢复。实机熄灯和重新亮灯时未观察到链路通知，因此界面按连接状态显示。
+
 ## 静置与缓存
 鼠标 15 秒无对应 Raw Input 活动后停止主动查询；盘古以厂商接口消失判断休眠或断开，接口重现后恢复。
 只使用 RAWINPUTHEADER.hDevice 和 RIDI_DEVICENAME，不读取输入内容。

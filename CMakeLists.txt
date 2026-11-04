@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(PeripheralBattery VERSION 0.1.2 LANGUAGES CXX RC)
+project(PeripheralBattery VERSION 0.1.3 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 20)
 set(PBC_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/dist" CACHE PATH "Release executable output")
 set(PBC_TEST_DATA_DIR "${CMAKE_SOURCE_DIR}/verification/ui-regression/data" CACHE PATH "Isolated UI test data")

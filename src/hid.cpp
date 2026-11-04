@@ -7,6 +7,7 @@
 #include <hidsdi.h>
 #include <hidpi.h>
 #include <iomanip>
+#include <optional>
 #include <setupapi.h>
 #include <string_view>
 namespace pbc {
@@ -203,6 +204,12 @@ Reading ParseMchoseK99V3(std::span<const uint8_t> r) {
         return {};
     return {.level = level, .charging = (r[41] & 0x80) != 0};
 }
+std::optional<MchoseLink> ParseMchoseLink(std::span<const uint8_t> r) {
+    // The receiver uses the same link-loss notification for sleep and going offline.
+    if (r.size() == 65 && r[0] == 0 && r[1] == 0xfa && r[2] == 0xfb && r[3] == 6 && r[4] <= 1)
+        return r[4] == 0 ? MchoseLink::Down : MchoseLink::Up;
+    return std::nullopt;
+}
 void QueryDevice(Device &d) {
     d.queried = true;
     try {
@@ -397,6 +404,8 @@ ScanResult ScanDevices(const Settings &s, bool enroll) {
             d.dormant = s.paused.contains(d.key);
             if (d.registered && !d.dormant)
                 QueryDevice(d);
+            if (d.protocol == Protocol::MchoseK99V3 && d.queried && !d.connected)
+                d.dormant = true;
             result.devices.push_back(std::move(d));
         }
     } catch (const std::wstring &e) {
@@ -419,53 +428,70 @@ void PreserveReading(Device &current, const Device &previous, bool recent) {
         current.dormant = true;
     }
 }
-void WatchNova(const std::wstring &path, HANDLE stop, HWND target, UINT updateMsg, UINT closedMsg) {
+namespace {
+template <class Receive> void WatchHidReports(const std::wstring &path, HANDLE stop, Receive receive) {
     Handle file(
         CreateFileW(path.c_str(), GENERIC_READ, 3, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
-    if (file) {
-        Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-        Reading last;
-        bool sent = false;
-        if (event)
-            for (;;) {
-                std::array<uint8_t, 65> data{};
-                OVERLAPPED ov{};
-                ov.hEvent = event.h;
-                ResetEvent(event.h);
-                DWORD count = 0;
-                BOOL ready = ReadFile(file.h, data.data(), DWORD(data.size()), &count, &ov);
-                if (!ready) {
-                    if (GetLastError() != ERROR_IO_PENDING)
-                        break;
-                    HANDLE waits[] = {stop, event.h};
-                    DWORD which = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
-                    if (which != WAIT_OBJECT_0 + 1) {
-                        CancelIoEx(file.h, &ov);
-                        GetOverlappedResult(file.h, &ov, &count, TRUE);
-                        break;
-                    }
-                    if (!GetOverlappedResult(file.h, &ov, &count, FALSE))
-                        break;
-                }
-                auto report = std::span<const uint8_t>(data.data(), count);
-                if (report.size() < 4 || !(report[0] == 0xb0 || (report[0] == 0 && report[1] == 0xb0)))
-                    continue;
-                auto parsed = ParseNova(report);
-                if (sent && parsed.level == last.level && parsed.charging == last.charging &&
-                    parsed.full == last.full && parsed.error == last.error)
-                    continue;
-                last = parsed;
-                sent = true;
-                auto result = new Reading(std::move(parsed));
-                if (!PostMessageW(target, updateMsg, 0, reinterpret_cast<LPARAM>(result))) {
-                    delete result;
-                    break;
-                }
-                if (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0)
-                    break;
+    if (!file)
+        return;
+    Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!event)
+        return;
+    while (WaitForSingleObject(stop, 0) == WAIT_TIMEOUT) {
+        std::array<uint8_t, 65> data{};
+        OVERLAPPED ov{};
+        ov.hEvent = event.h;
+        ResetEvent(event.h);
+        DWORD count = 0;
+        if (!ReadFile(file.h, data.data(), DWORD(data.size()), &count, &ov)) {
+            if (GetLastError() != ERROR_IO_PENDING)
+                break;
+            HANDLE waits[] = {stop, event.h};
+            if (WaitForMultipleObjects(2, waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) {
+                CancelIoEx(file.h, &ov);
+                GetOverlappedResult(file.h, &ov, &count, TRUE);
+                break;
             }
+            if (!GetOverlappedResult(file.h, &ov, &count, FALSE))
+                break;
+        }
+        if (!receive(std::span<const uint8_t>(data.data(), count)))
+            break;
     }
+}
+} // namespace
+
+void WatchNova(const std::wstring &path, HANDLE stop, HWND target, UINT updateMsg, UINT closedMsg) {
+    Reading last;
+    bool sent = false;
+    WatchHidReports(path, stop, [&](auto report) {
+        if (report.size() < 4 || !(report[0] == 0xb0 || (report[0] == 0 && report[1] == 0xb0)))
+            return true;
+        auto parsed = ParseNova(report);
+        if (sent && parsed.level == last.level && parsed.charging == last.charging &&
+            parsed.full == last.full && parsed.error == last.error)
+            return true;
+        last = parsed;
+        sent = true;
+        auto result = new Reading(std::move(parsed));
+        if (PostMessageW(target, updateMsg, 0, reinterpret_cast<LPARAM>(result)))
+            return true;
+        delete result;
+        return false;
+    });
     PostMessageW(target, closedMsg, 0, 0);
+}
+
+void WatchMchose(const std::wstring &path, HANDLE stop, HWND target, UINT message) {
+    std::optional<MchoseLink> last;
+    WatchHidReports(path, stop, [&](auto report) {
+        auto state = ParseMchoseLink(report);
+        if (!state || state == last)
+            return true;
+        last = state;
+        return PostMessageW(target, message, WPARAM(*state), 0) != FALSE;
+    });
+    PostMessageW(target, message, WPARAM(MchoseLink::Closed), 0);
 }
 bool RunParserTests(std::wstring &e) {
     auto c = [&](bool ok, const wchar_t *name) {
@@ -520,6 +546,12 @@ bool RunParserTests(std::wstring &e) {
     k99[4] = 0x4f;
     k99[2] = 0x03;
     c(ParseMchoseK99V3(k99).level == -1, L"k99 receiver info is not battery");
+    std::array<uint8_t, 65> link{0, 0xfa, 0xfb, 6, 0};
+    c(ParseMchoseLink(link) == MchoseLink::Down, L"k99 link lost");
+    link[4] = 1;
+    c(ParseMchoseLink(link) == MchoseLink::Up, L"k99 link restored");
+    link[3] = 7;
+    c(!ParseMchoseLink(link) && !ParseMchoseLink(k99), L"k99 unrelated notifications");
     Device previous;
     previous.battery.level = 73;
     Device current;

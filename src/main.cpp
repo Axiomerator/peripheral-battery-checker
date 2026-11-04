@@ -19,7 +19,7 @@ using namespace pbc;
 using namespace Gdiplus;
 namespace {
 constexpr UINT TrayMsg = WM_APP + 1, ResultMsg = WM_APP + 2, OpenMsg = WM_APP + 3, QuitMsg = WM_APP + 4,
-               NovaMsg = WM_APP + 5, NovaClosed = WM_APP + 6;
+               NovaMsg = WM_APP + 5, NovaClosed = WM_APP + 6, MchoseMsg = WM_APP + 7;
 constexpr wchar_t HostClass[] = L"PBC.Host.1", ViewClass[] = L"PBC.View.1";
 enum Cmd {
     Refresh = 100,
@@ -73,6 +73,9 @@ struct App {
     HANDLE watchStop{};
     std::thread novaWatch;
     std::wstring novaPath;
+    HANDLE mchoseStop{};
+    std::thread mchoseWatch;
+    std::wstring mchosePath;
     std::thread worker;
     std::mutex mutex;
     std::condition_variable cv;
@@ -109,6 +112,8 @@ std::wstring Status(const Device &d) {
         return L"尚未登记";
     if (d.dormant && d.battery.error == L"读数异常，保留上次电量")
         return d.battery.error;
+    if (d.dormant && d.protocol == Protocol::MchoseK99V3)
+        return d.battery.level >= 0 ? L"未连接 · 保留电量" : L"未连接";
     if (d.dormant)
         return d.connected ? L"静置 · 已暂停查询" : L"休眠或未连接 · 保留上次电量";
     if (d.battery.level < 0)
@@ -159,11 +164,15 @@ void Tray(bool add = false) {
     a->nid.hIcon = a->tray;
     a->nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_GUID;
     std::wstring tip = L"Peripheral Battery";
-    for (auto *d : Visible())
-        tip += L"\n" + d->name + L"  " +
-               (d->battery.level < 0 ? L"未知" : std::to_wstring(d->battery.level) + L"%") +
-               (d->battery.charging && !d->dormant ? L" · 充电中" : L"");
-    wcsncpy_s(a->nid.szTip, tip.c_str(), _TRUNCATE);
+    for (auto *d : Visible()) {
+        auto line = L"\n" + d->name + L"  " +
+                    (d->battery.level < 0 ? L"未知" : std::to_wstring(d->battery.level) + L"%") +
+                    (d->battery.charging && !d->dormant ? L" · 充电中" : L"");
+        if (tip.size() + line.size() >= std::size(a->nid.szTip))
+            break;
+        tip += line;
+    }
+    wcscpy_s(a->nid.szTip, tip.c_str());
     Shell_NotifyIconW(add ? NIM_ADD : NIM_MODIFY, &a->nid);
     if (add) {
         a->nid.uVersion = NOTIFYICON_VERSION_4;
@@ -415,6 +424,8 @@ void Command(int id) {
             if (!d.registered) {
                 d.battery = {};
                 d.connected = false;
+                if (d.protocol == Protocol::MchoseK99V3)
+                    a->settings.paused.erase(d.key);
             }
         } else {
             if (!d.registered)
@@ -490,6 +501,10 @@ void Grip(Graphics &g, float x, float y, Color color) {
             g.FillEllipse(&brush, x + column * 4.f, y + row * 5.f, 2.f, 2.f);
 }
 
+RectF BatteryNumberBounds(float right, float y, bool mini) {
+    return mini ? RectF(right - 110, y + 11, 82, 40) : RectF(right - 170, y + 12, 122, 60);
+}
+
 void Card(Graphics &g, const Device &d, float y, int width, bool mini) {
     float x = mini ? 16.f : 32.f, w = width - x * 2, h = mini ? 72.f : 104.f;
     Round(g, x, y, w, h, mini ? 12.f : 14.f, Surface(), Edge());
@@ -499,10 +514,12 @@ void Card(Graphics &g, const Device &d, float y, int width, bool mini) {
     Round(g, ix - 5, iy - 5, size + 10, size + 10, 12, Color(255, 29, 46, 51));
     DeviceIcon(g, d.kind, ix, iy, size, c);
     float tx = x + (mini ? 75.f : 100.f);
-    Text(g, d.name, tx, y + (mini ? 10.f : 17.f), w - (mini ? 158.f : 250.f), 26, mini ? 13.f : 16.f, Ink(),
-         true);
+    auto number = BatteryNumberBounds(x + w, y, mini);
+    bool charging = d.battery.charging && !d.dormant;
+    float labelWidth = mini ? number.X - tx - (charging ? 24.f : 8.f) : w - 250;
+    Text(g, d.name, tx, y + (mini ? 10.f : 17.f), labelWidth, 26, mini ? 13.f : 16.f, Ink(), true);
     if (mini)
-        Text(g, Status(d), tx, y + 36, w - 166, 20, 10, Muted());
+        Text(g, Status(d), tx, y + 36, labelWidth, 20, 10, Muted());
     else {
         Text(g, d.subtitle, tx, y + 47, w - 250, 20, 11, Muted());
         auto status = Status(d);
@@ -514,14 +531,12 @@ void Card(Graphics &g, const Device &d, float y, int width, bool mini) {
             Round(g, x + w - 184, y + 80, 160 * d.battery.level / 100.f, 4, 2, c);
     }
     auto value = d.battery.level < 0 ? L"—" : std::to_wstring(d.battery.level);
-    float px = x + w - (mini ? 90.f : 170.f);
-    Text(g, value, px, y + (mini ? 11.f : 12.f), mini ? 62.f : 122.f, mini ? 40.f : 60.f, mini ? 28.f : 44.f,
-         c, true, 2);
+    Text(g, value, number.X, number.Y, number.Width, number.Height, mini ? 28.f : 44.f, c, true, 2);
     if (d.battery.level >= 0)
         Text(g, L"%", x + w - (mini ? 28.f : 44.f), y + (mini ? 26.f : 37.f), 24, 24, mini ? 12.f : 16.f,
              Muted());
-    if (d.battery.charging && !d.dormant)
-        Bolt(g, px - 18, y + 26, 16, c);
+    if (charging)
+        Bolt(g, number.X - 18, y + 26, 16, c);
 }
 
 void DrawFrame(Graphics &g, View &v) {
@@ -580,9 +595,9 @@ void DrawFrame(Graphics &g, View &v) {
             Text(g, d.name, 110, y + 7, w - 364, 24, 14, Ink(), true);
             wchar_t id[70];
             swprintf_s(id, L"%04X:%04X · %s", d.vid, d.pid,
-                       d.dormant     ? L"静置 / 休眠"
-                       : d.connected ? L"已连接"
-                                     : L"未连接");
+                       d.dormant && d.protocol != Protocol::MchoseK99V3 ? L"静置 / 休眠"
+                       : d.connected                                    ? L"已连接"
+                                                                        : L"未连接");
             Text(g, id, 110, y + 36, w - 364, 20, 10, Muted());
             Line(g, 40, y + 78, w - 40, y + 78, Edge(), 1);
         }
@@ -746,13 +761,34 @@ void VerifyControls() {
     Main(false);
     RefreshNow();
 }
+void StopMchoseWatch() {
+    if (a->mchoseStop) {
+        SetEvent(a->mchoseStop);
+        a->mchoseWatch.join();
+        CloseHandle(a->mchoseStop);
+        a->mchoseStop = nullptr;
+    }
+    a->mchosePath.clear();
+    // A closed receiver may have queued a notification just before shutdown.
+    MSG pending{};
+    while (PeekMessageW(&pending, a->host, MchoseMsg, MchoseMsg, PM_REMOVE)) {
+    }
+}
+
 void Apply(ScanResult &r) {
     a->busy = false;
     a->notice = r.error;
     auto previous = a->devices;
-    bool preferencesChanged = false;
+    bool preferencesChanged = false, pauseChanged = false;
     for (auto &d : r.devices) {
         auto old = std::find_if(previous.begin(), previous.end(), [&](auto &x) { return x.key == d.key; });
+        if (d.protocol == Protocol::MchoseK99V3 && a->settings.paused.contains(d.key)) {
+            // A query already in flight may finish after the link-loss notification.
+            d.battery = {};
+            d.dormant = true;
+            d.queried = false;
+            d.connected = false;
+        }
         if (old != previous.end()) {
             SYSTEMTIME now;
             GetLocalTime(&now);
@@ -784,10 +820,28 @@ void Apply(ScanResult &r) {
             d.connected = false;
             d.dormant = true;
             d.battery.error = L"休眠或接收器未连接";
+            if (d.protocol == Protocol::MchoseK99V3 && r.error.empty()) {
+                d.path.clear();
+                pauseChanged |= a->settings.paused.erase(d.key) > 0;
+            }
             r.devices.push_back(d);
         }
     a->devices = std::move(r.devices);
     SortDevices(a->devices, a->settings);
+    auto keyboard = std::find_if(a->devices.begin(), a->devices.end(), [](const auto &d) {
+        return d.protocol == Protocol::MchoseK99V3 && d.registered && !d.path.empty();
+    });
+    const std::wstring path = keyboard == a->devices.end() ? L"" : keyboard->path;
+    if (path != a->mchosePath) {
+        StopMchoseWatch();
+        if (!path.empty()) {
+            a->mchoseStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (a->mchoseStop) {
+                a->mchosePath = path;
+                a->mchoseWatch = std::thread(WatchMchose, path, a->mchoseStop, a->host, MchoseMsg);
+            }
+        }
+    }
     for (auto &d : a->devices)
         if (d.protocol == Protocol::Nova && d.registered && d.connected && !d.path.empty() &&
             a->novaPath.empty()) {
@@ -801,6 +855,10 @@ void Apply(ScanResult &r) {
     GetLocalTime(&a->updated);
     if (preferencesChanged)
         Save();
+    else if (pauseChanged) {
+        std::lock_guard lock(a->mutex);
+        a->workerSettings = a->settings;
+    }
     Tray();
     if (a->main.hwnd)
         Resize(a->main);
@@ -1169,12 +1227,49 @@ bool VerifyLayout() {
         d.name = L"测试设备 " + std::to_wstring(i + 1);
         d.subtitle = L"布局验证 · 非真实设备";
         d.kind = Kind(i % 4);
-        d.battery.level = 28 + i * 5;
+        d.battery.level = i == 0 || i % 4 == 3 ? 100 : 28 + i * 5;
+        d.battery.charging = i == 0 || i % 4 == 3;
         d.connected = true;
         a->settings.devices[d.key] = {true, true, i};
         a->devices.push_back(std::move(d));
     }
+    auto &keyboard = a->devices[3];
+    keyboard.protocol = Protocol::MchoseK99V3;
+    a->mchosePath = keyboard.path = L"test keyboard receiver";
+    SendMessageW(a->host, MchoseMsg, WPARAM(MchoseLink::Down), 0);
+    check(keyboard.dormant && !keyboard.connected && keyboard.battery.level == 100 &&
+              a->workerSettings.paused.contains(keyboard.key),
+          "keyboard link loss keeps cached charge and pauses queries");
+    SendMessageW(a->host, MchoseMsg, WPARAM(MchoseLink::Up), 0);
+    check(!a->workerSettings.paused.contains(keyboard.key) && a->request,
+          "keyboard link restore queues battery refresh");
+    keyboard.dormant = false;
+    keyboard.connected = true;
+    keyboard.path.clear();
+    a->mchosePath.clear();
     a->busy = false;
+    bool allDigitsFit = true;
+    FontFamily family(L"Microsoft YaHei UI");
+    StringFormat format;
+    format.SetFormatFlags(StringFormatFlagsNoWrap);
+    format.SetTrimming(StringTrimmingEllipsisCharacter);
+    format.SetAlignment(StringAlignmentFar);
+    format.SetLineAlignment(StringAlignmentCenter);
+    for (float scale : {1.f, 1.25f, 1.5f, 2.f}) {
+        Bitmap bitmap(256, 144, PixelFormat32bppPARGB);
+        Graphics graphics(&bitmap);
+        graphics.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        graphics.ScaleTransform(scale, scale);
+        for (bool mini : {true, false}) {
+            auto bounds = BatteryNumberBounds(mini ? 304.f : 608.f, 0, mini);
+            Font digits(&family, mini ? 28.f : 44.f, FontStyleBold, UnitPixel);
+            RectF measured;
+            INT characters = 0;
+            graphics.MeasureString(L"100", 3, &digits, bounds, &format, &measured, &characters, nullptr);
+            allDigitsFit = allDigitsFit && characters == 3 && measured.Width <= bounds.Width;
+        }
+    }
+    check(allDigitsFit, "100 fits popup and overview at 100/125/150/200 percent DPI");
     auto output = std::filesystem::path(a->directory).parent_path();
     std::filesystem::create_directories(output);
     Save();
@@ -1474,6 +1569,36 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         a->novaPath.clear();
         return 0;
+    case MchoseMsg: {
+        auto state = MchoseLink(w);
+        if (state == MchoseLink::Closed) {
+            StopMchoseWatch();
+            return 0;
+        }
+        for (auto &d : a->devices) {
+            if (d.protocol != Protocol::MchoseK99V3 || !d.registered || d.path != a->mchosePath)
+                continue;
+            if (state == MchoseLink::Up) {
+                a->settings.paused.erase(d.key);
+                RefreshNow();
+            } else {
+                d.dormant = true;
+                d.connected = false;
+                a->settings.paused.insert(d.key);
+                {
+                    std::lock_guard lock(a->mutex);
+                    a->workerSettings = a->settings;
+                }
+                Tray();
+                if (a->main.hwnd)
+                    InvalidateRect(a->main.hwnd, nullptr, FALSE);
+                if (a->popup.hwnd)
+                    InvalidateRect(a->popup.hwnd, nullptr, FALSE);
+            }
+            break;
+        }
+        return 0;
+    }
     case WM_INPUT: {
         RAWINPUTHEADER header{};
         UINT size = sizeof(header);
@@ -1496,6 +1621,8 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 it = a->inputPaths.emplace(header.hDevice, std::move(path)).first;
             }
             for (auto &d : a->devices) {
+                if (d.protocol == Protocol::MchoseK99V3)
+                    continue;
                 wchar_t token[40];
                 swprintf_s(token, L"vid_%04x&pid_%04x", d.vid, d.pid);
                 if (it->second.find(token) == std::wstring::npos)
@@ -1615,6 +1742,7 @@ LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (a->quitting)
             return 0;
         a->quitting = true;
+        StopMchoseWatch();
         if (a->watchStop)
             SetEvent(a->watchStop);
         if (a->novaWatch.joinable())
